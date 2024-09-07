@@ -1,7 +1,0 @@
-services:
-  - name: my-flask-app
-    image: my-flask-app-image
-    command: u.py
-    ports:
-      - port: 80
-        targetPort: 8000

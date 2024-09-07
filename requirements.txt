@@ -1,5 +1,5 @@
 gunicorn
-elenium==4.24.0
+selenium==4.24.0
 requests==2.32.3
 flask ==3.0.3
 

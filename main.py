@@ -11,13 +11,18 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import urllib3
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def download_images(name, scroll_attempts):
     # Setup ChromeDriver
     chrome_options = Options()
     chrome_options.add_argument("--headless")  # Run in headless mode for background operation
-    chrome_driver_path = '/usr/bin/chromedriver'  # Path to ChromeDriver
+
+    # Path to the ChromeDriver executable
+    chrome_driver_path = r'C:\Program Files\chromedriver\chromedriver.exe'
+    print(chrome_driver_path)
+
     driver = webdriver.Chrome(service=Service(chrome_driver_path), options=chrome_options)
 
     # Pinterest URL
@@ -27,19 +32,20 @@ def download_images(name, scroll_attempts):
     # Allow some time for the page to load
     WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'img')))
 
-    def download_images_from_elements(images, zipf):
+    def download_images_from_elements(images, zipf, seen_urls):
         for image in images:
             img_url = image.get_attribute('src')
-            if img_url:
+            if img_url and img_url not in seen_urls:
+                seen_urls.add(img_url)  # Track the URL to avoid duplicates
                 img_name = img_url.split('/')[-1].split('?')[0]
                 
                 # Download the image
                 try:
-                    img_response = requests.get(img_url, verify=True)
+                    img_response = requests.get(img_url, verify=False)  # Verify False if using HTTP instead of HTTPS
                     img_response.raise_for_status()
                     if img_response.status_code == 200:
                         # Write image to zip file in memory
-                        print(img_name)
+                        print(f"Downloading {img_name}")
                         zipf.writestr(img_name, img_response.content)
                 except requests.RequestException as e:
                     print(f"Error downloading image {img_url}: {e}")
@@ -47,6 +53,7 @@ def download_images(name, scroll_attempts):
     # Create an in-memory file object for the zip file
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zipf:
+        seen_urls = set()  # Initialize a set to keep track of seen URLs
         # Scroll and download images incrementally
         for _ in range(scroll_attempts):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -54,7 +61,7 @@ def download_images(name, scroll_attempts):
 
             # Find image elements after each scroll
             images = driver.find_elements(By.TAG_NAME, 'img')
-            download_images_from_elements(images, zipf)
+            download_images_from_elements(images, zipf, seen_urls)
 
             time.sleep(2)  # Adjust this time if needed
 

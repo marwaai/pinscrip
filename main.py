@@ -1,54 +1,84 @@
-from flask import Flask, request, jsonify
-from PIL import Image
-import numpy as np
 import io
-import base64
-from sklearn.datasets import load_iris
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score
+import zipfile
+import os
+import requests
+import time
 
-app = Flask(__name__)
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Load and prepare the model
-iris = load_iris()
-X = iris.data
-y = iris.target
+def download_images(name, scroll_attempts):
+    # Setup ChromeDriver
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")  # Run in headless mode for background operation
+    chrome_driver_path = '/usr/bin/chromedriver'  # Path to ChromeDriver
+    driver = webdriver.Chrome(service=Service(chrome_driver_path), options=chrome_options)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+    # Pinterest URL
+    url = f'https://www.pinterest.com/search/pins/?q={name}&rs=typed'
+    driver.get(url)
 
-model = KNeighborsClassifier(n_neighbors=3)
-model.fit(X_train, y_train)
+    # Allow some time for the page to load
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'img')))
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image file provided'}), 400
+    def download_images_from_elements(images, zipf):
+        for image in images:
+            img_url = image.get_attribute('src')
+            if img_url:
+                img_name = img_url.split('/')[-1].split('?')[0]
+                
+                # Download the image
+                try:
+                    img_response = requests.get(img_url, verify=True)
+                    img_response.raise_for_status()
+                    if img_response.status_code == 200:
+                        # Write image to zip file in memory
+                        print(img_name)
+                        zipf.writestr(img_name, img_response.content)
+                except requests.RequestException as e:
+                    print(f"Error downloading image {img_url}: {e}")
 
-    image_file = request.files['image']
-    image = Image.open(image_file).convert('RGB')
+    # Create an in-memory file object for the zip file
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w') as zipf:
+        # Scroll and download images incrementally
+        for _ in range(scroll_attempts):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)  # Allow time for new images to load
+
+            # Find image elements after each scroll
+            images = driver.find_elements(By.TAG_NAME, 'img')
+            download_images_from_elements(images, zipf)
+
+            time.sleep(2)  # Adjust this time if needed
+
+    driver.quit()
+
+    # Rewind the zip file to the beginning
+    zip_buffer.seek(0)
     
-    # Preprocess the image
-    image = np.array(image.resize((4, 4)))  # Resize image for simplicity
-    image = image.flatten()  # Flatten to 1D array
-    
-    # Dummy feature scaling for demonstration (actual model should be trained with real image data)
-    image = np.expand_dims(image, axis=0)
-    image = scaler.transform(image)
-    
-    # Predict using the trained model
-    prediction = model.predict(image)
-    class_name = iris.target_names[prediction[0]]
-    
-    return jsonify({'prediction': class_name})
+    return zip_buffer
 
-@app.route('/status', methods=['GET'])
-def status():
-    return jsonify({'status': 'Running'})
+def main():
+    # Get user input
+    name = input("Enter the search term: ")
+    scroll_attempts = int(input("Enter the number of scroll attempts: "))
+
+    # Download images and create zip file
+    zip_buffer = download_images(name, scroll_attempts)
+
+    # Save the zip file to disk
+    zip_filename = f'{name}_images.zip'
+    with open(zip_filename, 'wb') as f:
+        f.write(zip_buffer.getvalue())
+    
+    print(f"Zip file '{zip_filename}' created and saved locally.")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    main()
